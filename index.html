@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <style>
+
+#iframe {
+    width: 587px ;
+    height: 600px ;
+}
+
+#code-box {
+
+}
+
+    </style>
+
+    <script src="yaml.js"></script>
+
+    <script>
+
+function ready(fn) {
+    if (document.readyState != 'loading'){
+        fn();
+    } else {
+        document.addEventListener('DOMContentLoaded', fn);
+    }
+}
+
+ready(async() => {
+
+    let columns = [
+        { name: 'len',  id: 0, measureType: 'continuous', dataType: 'decimal' },
+        { name: 'dose', id: 1, measureType: 'ordinal', dataType: 'integer' },
+        { name: 'supp', id: 2, measureType: 'nominal', dataType: 'text' },
+    ]
+
+    for (let column of columns)
+        Object.assign(column, { columnType: 'data', columnFound: true, hidden: false, outputAnalysisId: null });
+
+    let iframe = document.getElementById('iframe');
+    let codeBox = document.getElementById('code-box');
+
+    // options for the analysis are assigned to this
+    let options = { };
+
+    // provide information to the UI
+    window.addEventListener('message', function(message) {
+        let { data } = message;
+
+        if (data.msgType === 'requestData') {
+
+            if (data.args[0].requestType === 'columns') {
+                let payload = {
+                    fResponseID: data.fRequestID,
+                    msgType: 'requestData',
+                    result: {
+                        columns: columns,
+                    },
+                    namespace: '',
+                    success: true,
+                }
+                iframe.contentWindow.postMessage(payload, '*');
+            }
+            else if (data.args[0].requestType === 'column') {
+                let columnId = data.args[0].id;
+                let column = columns[columnId];
+                let payload = {
+                    fResponseID: data.fRequestID,
+                    result: column,
+                    namespace: '',
+                    success: true,
+                }
+                iframe.contentWindow.postMessage(payload, '*');
+            }
+        }
+        else if (data.msgType === 'onOptionsChanged') {
+            Object.assign(options, data.args[0].values);
+            codeBox.innerText = JSON.stringify(options, null, '  ');
+
+            let payload = {
+                fResponseID: data.fRequestID,
+                namespace: '',
+                success: true,
+            }
+            iframe.contentWindow.postMessage(payload, '*');
+        }
+        else if (data.msgType === 'onFrameMouseEvent') {
+            let payload = {
+                fResponseID: data.fRequestID,
+                namespace: '',
+                success: true,
+            }
+            iframe.contentWindow.postMessage(payload, '*');
+        }
+    });
+
+    let iframeReady = new Promise((resolve, reject) => {
+        window.addEventListener('message', function(message) {
+            let { data } = message;
+            let payload = {
+                fResponseID: data.fRequestId,
+                namespace: '',
+                success: true,
+            }
+            postMessage(payload, '*');
+            resolve();
+        }, { once: true });
+    });
+
+    // wait for the iframe to be ready
+    await iframeReady;
+
+    // get the analysis definitions
+    let response = await fetch('jmv.yaml');
+    let content = await response.text();
+    let data = YAML.parse(content);
+
+    // pluck out the anova from the definitions
+    let analysis;
+    for (analysis of data.analyses) {
+        if (analysis.name === 'anova') {
+            break;
+        }
+    }
+
+    // init the UI for the anova
+    await new Promise((resolve, reject) => {
+
+        let payload = {
+            fRequestID: 7,
+            msgType: 'setOptionsDefinition',
+            namespace: '',
+            args: [
+                analysis.uijs
+            ],
+        }
+        iframe.contentWindow.postMessage(payload, '*');
+
+        // wait for the response
+        let callback = function(message) {
+            let { data } = message;
+            if (data.fResponseID === 7) {
+                window.removeEventListener('message', callback);
+                resolve();
+            }
+        }
+        window.addEventListener('message', callback);
+    });
+
+    // send across the options (blank in this case -- use defaults)
+    payload = {
+        fRequestID: 9,
+        msgType: 'initialiseOptions',
+        namespace: '',
+        args: [ { } ],
+    }
+    iframe.contentWindow.postMessage(payload, '*');
+
+});
+
+
+
+    </script>
+</head>
+
+<body>
+    <iframe id="iframe" src="https://a.cloud.jamovi.org/analysisui.html"></iframe>
+    <pre id="code-box"></pre>
+</body>
+
+</html>
